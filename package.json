@@ -1,0 +1,19 @@
+{
+  "name": "nba-hangtime-web",
+  "version": "0.1.0",
+  "description": "NBA Hangtime-inspired arcade basketball game",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "phaser": "^3.80.1",
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10"
+  }
+}
