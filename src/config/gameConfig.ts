@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { BootScene } from '../scenes/BootScene';
 import { PreloadScene } from '../scenes/PreloadScene';
+import { AttractScene } from '../scenes/AttractScene';
 import { MenuScene } from '../scenes/MenuScene';
 import { TeamSelectScene } from '../scenes/TeamSelectScene';
 import { GameScene } from '../scenes/GameScene';
@@ -21,7 +22,7 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
       debug: false,
     },
   },
-  scene: [BootScene, PreloadScene, MenuScene, TeamSelectScene, GameScene],
+  scene: [BootScene, PreloadScene, AttractScene, MenuScene, TeamSelectScene, GameScene],
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,

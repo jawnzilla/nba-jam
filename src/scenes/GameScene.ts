@@ -2,6 +2,9 @@ import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT, COURT_BOUNDS, GAME_SETTINGS } from '../config/gameConfig';
 import { Player } from '../entities/Player';
 import { Ball } from '../entities/Ball';
+import { InputManager, InputAction } from '../managers/InputManager';
+import { GameStateManager, GameState } from '../managers/GameStateManager';
+import { PauseMenu } from '../ui/PauseMenu';
 
 export class GameScene extends Phaser.Scene {
   private players: Player[] = [];
@@ -16,7 +19,10 @@ export class GameScene extends Phaser.Scene {
   private scoreText!: Phaser.GameObjects.Text;
   private timeText!: Phaser.GameObjects.Text;
   private shotClockText!: Phaser.GameObjects.Text;
-  private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  private quarterText!: Phaser.GameObjects.Text;
+  private inputManager!: InputManager;
+  private pauseMenu!: PauseMenu;
+  private hoopZones: { left: Phaser.Geom.Rectangle; right: Phaser.Geom.Rectangle } | null = null;
 
   constructor() {
     super({ key: 'GameScene' });
@@ -30,7 +36,9 @@ export class GameScene extends Phaser.Scene {
     this.createBall();
     this.createUI();
     this.setupInput();
+    this.setupPauseMenu();
     this.startGameClock();
+    GameStateManager.setState(GameState.GAMEPLAY);
   }
 
   private resetGameState(): void {
@@ -41,6 +49,7 @@ export class GameScene extends Phaser.Scene {
     this.quarter = 1;
     this.isPaused = false;
     this.players = [];
+    GameStateManager.resetGameData();
   }
 
   private createCourt(): void {
@@ -71,6 +80,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createHoops(): void {
+    const leftHoopX = COURT_BOUNDS.left + 20;
+    const rightHoopX = COURT_BOUNDS.right - 20;
+    const hoopY = GAME_HEIGHT - 170;
+
     const leftHoop = this.add.graphics();
     leftHoop.fillStyle(0xffffff, 1);
     leftHoop.fillRect(COURT_BOUNDS.left - 10, GAME_HEIGHT - 280, 15, 120);
@@ -90,6 +103,11 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < 5; i++) {
       rightHoop.lineBetween(COURT_BOUNDS.right - 40 + i * 8, GAME_HEIGHT - 165, COURT_BOUNDS.right - 35 + i * 8, GAME_HEIGHT - 140);
     }
+
+    this.hoopZones = {
+      left: new Phaser.Geom.Rectangle(leftHoopX - 25, hoopY - 25, 50, 50),
+      right: new Phaser.Geom.Rectangle(rightHoopX - 25, hoopY - 25, 50, 50),
+    };
   }
 
   private createPlayers(): void {
@@ -103,6 +121,7 @@ export class GameScene extends Phaser.Scene {
 
   private createBall(): void {
     this.ball = new Ball(this, GAME_WIDTH / 2, GAME_HEIGHT - 200);
+    this.ball.setHoopZones(this.hoopZones);
     this.players[0].giveBall(this.ball);
   }
 
@@ -137,7 +156,7 @@ export class GameScene extends Phaser.Scene {
     });
     this.timeText.setOrigin(0.5, 0);
 
-    this.add.text(GAME_WIDTH / 2 + 80, 55, 'Q' + this.quarter, {
+    this.quarterText = this.add.text(GAME_WIDTH / 2 + 80, 55, 'Q' + this.quarter, {
       fontFamily: 'Arial',
       fontSize: '18px',
       color: '#888888',
@@ -150,26 +169,88 @@ export class GameScene extends Phaser.Scene {
     });
     this.shotClockText.setOrigin(1, 0);
 
-    const pauseText = this.add.text(20, GAME_HEIGHT - 20, 'ESC: Pause | WASD/Arrows: Move | Space: Shoot/Action', {
+    const controlsText = this.add.text(20, GAME_HEIGHT - 20, 'ESC: Pause | Arrows/WASD: Move | Space: Shoot | E: Pass | Q: Steal | Shift: Turbo', {
       fontFamily: 'Arial',
-      fontSize: '12px',
+      fontSize: '11px',
       color: '#666666',
     });
-    pauseText.setOrigin(0, 1);
+    controlsText.setOrigin(0, 1);
   }
 
   private setupInput(): void {
-    if (this.input.keyboard) {
-      this.cursors = this.input.keyboard.createCursorKeys();
+    this.inputManager = new InputManager(this);
 
-      this.input.keyboard.on('keydown-ESC', () => {
-        this.togglePause();
-      });
+    this.inputManager.onAction(InputAction.PAUSE, () => {
+      this.togglePause();
+    });
 
-      this.input.keyboard.on('keydown-SPACE', () => {
+    this.inputManager.onAction(InputAction.SHOOT, () => {
+      if (!this.isPaused) {
         this.playerAction();
-      });
-    }
+      }
+    });
+
+    this.inputManager.onAction(InputAction.PASS, () => {
+      if (!this.isPaused) {
+        this.playerPass();
+      }
+    });
+
+    this.inputManager.onAction(InputAction.STEAL, () => {
+      if (!this.isPaused) {
+        this.playerSteal();
+      }
+    });
+  }
+
+  private setupPauseMenu(): void {
+    this.pauseMenu = new PauseMenu(this, {
+      onResume: () => {
+        this.resumeGame();
+      },
+      onRestart: () => {
+        this.restartGame();
+      },
+      onMainMenu: () => {
+        this.returnToMainMenu();
+      },
+    });
+
+    this.input.keyboard?.on('keydown-UP', () => {
+      if (this.isPaused) {
+        this.pauseMenu.navigateUp();
+      }
+    });
+
+    this.input.keyboard?.on('keydown-DOWN', () => {
+      if (this.isPaused) {
+        this.pauseMenu.navigateDown();
+      }
+    });
+
+    this.input.keyboard?.on('keydown-W', () => {
+      if (this.isPaused) {
+        this.pauseMenu.navigateUp();
+      }
+    });
+
+    this.input.keyboard?.on('keydown-S', () => {
+      if (this.isPaused) {
+        this.pauseMenu.navigateDown();
+      }
+    });
+
+    this.input.keyboard?.on('keydown-ENTER', () => {
+      if (this.isPaused) {
+        this.pauseMenu.select();
+      }
+    });
+
+    this.input.keyboard?.on('keydown-SPACE', () => {
+      if (this.isPaused) {
+        this.pauseMenu.select();
+      }
+    });
   }
 
   private startGameClock(): void {
@@ -189,6 +270,13 @@ export class GameScene extends Phaser.Scene {
 
     this.timeText.setText(this.formatTime(this.gameTime));
     this.shotClockText.setText(Math.max(0, this.shotClock).toString());
+
+    GameStateManager.updateGameData({
+      homeScore: this.homeScore,
+      awayScore: this.awayScore,
+      quarter: this.quarter,
+      timeRemaining: this.gameTime,
+    });
 
     if (this.shotClock <= 5) {
       this.shotClockText.setColor('#ff0000');
@@ -212,35 +300,94 @@ export class GameScene extends Phaser.Scene {
   }
 
   private togglePause(): void {
-    this.isPaused = !this.isPaused;
-
     if (this.isPaused) {
-      this.physics.pause();
-      const pauseOverlay = this.add.graphics();
-      pauseOverlay.fillStyle(0x000000, 0.7);
-      pauseOverlay.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-      pauseOverlay.setName('pauseOverlay');
-
-      const pauseText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'PAUSED', {
-        fontFamily: 'Arial Black',
-        fontSize: '64px',
-        color: '#ffffff',
-      });
-      pauseText.setOrigin(0.5);
-      pauseText.setName('pauseText');
+      this.resumeGame();
     } else {
-      this.physics.resume();
-      const overlay = this.children.getByName('pauseOverlay');
-      const text = this.children.getByName('pauseText');
-      if (overlay) overlay.destroy();
-      if (text) text.destroy();
+      this.pauseGame();
     }
+  }
+
+  private pauseGame(): void {
+    this.isPaused = true;
+    this.physics.pause();
+    this.inputManager.setEnabled(false);
+    this.pauseMenu.show();
+    GameStateManager.setState(GameState.PAUSED);
+  }
+
+  private resumeGame(): void {
+    this.isPaused = false;
+    this.physics.resume();
+    this.inputManager.setEnabled(true);
+    this.pauseMenu.hide();
+    GameStateManager.setState(GameState.GAMEPLAY);
+  }
+
+  private restartGame(): void {
+    this.pauseMenu.hide();
+    this.timerEvent?.destroy();
+    this.inputManager?.destroy();
+    this.scene.restart();
+  }
+
+  private returnToMainMenu(): void {
+    this.pauseMenu.hide();
+    this.timerEvent?.destroy();
+    this.inputManager?.destroy();
+    GameStateManager.setState(GameState.MENU);
+    GameStateManager.resetGameData();
+    this.scene.start('MenuScene');
   }
 
   private playerAction(): void {
     const controlledPlayer = this.players[0];
     if (controlledPlayer.hasBall) {
-      controlledPlayer.shoot();
+      const inputState = this.inputManager.getInputState();
+      if (inputState.turbo && controlledPlayer.useTurbo(20)) {
+        controlledPlayer.dunk();
+      } else {
+        controlledPlayer.shoot();
+      }
+    }
+  }
+
+  private playerPass(): void {
+    const controlledPlayer = this.players[0];
+    if (controlledPlayer.hasBall) {
+      const teammate = this.players[1];
+      if (teammate) {
+        const ball = controlledPlayer.loseBall();
+        if (ball) {
+          ball.passTo(teammate.x, teammate.y - 40, () => {
+            teammate.giveBall(ball);
+          });
+        }
+      }
+    }
+  }
+
+  private playerSteal(): void {
+    const controlledPlayer = this.players[0];
+    if (!controlledPlayer.hasBall) {
+      const stealRange = 60;
+      for (const player of this.players) {
+        if (player.playerId !== controlledPlayer.playerId && player.hasBall) {
+          const distance = Phaser.Math.Distance.Between(
+            controlledPlayer.x, controlledPlayer.y,
+            player.x, player.y
+          );
+          if (distance < stealRange) {
+            const stealChance = (controlledPlayer.stats.steal / 10) * 0.4;
+            if (Math.random() < stealChance) {
+              const ball = player.loseBall();
+              if (ball) {
+                controlledPlayer.giveBall(ball);
+              }
+            }
+            break;
+          }
+        }
+      }
     }
   }
 
@@ -255,6 +402,8 @@ export class GameScene extends Phaser.Scene {
 
   private endQuarter(): void {
     this.quarter++;
+    this.quarterText.setText('Q' + Math.min(this.quarter, 4));
+
     if (this.quarter > 4) {
       this.endGame();
     } else {
@@ -265,6 +414,7 @@ export class GameScene extends Phaser.Scene {
 
   private endGame(): void {
     this.timerEvent.destroy();
+    GameStateManager.setState(GameState.GAME_OVER);
     this.scene.start('MenuScene');
   }
 
@@ -276,33 +426,33 @@ export class GameScene extends Phaser.Scene {
     }
     this.scoreText.setText(`${this.homeScore} - ${this.awayScore}`);
     this.resetShotClock();
+
+    GameStateManager.updateGameData({
+      homeScore: this.homeScore,
+      awayScore: this.awayScore,
+    });
   }
 
   update(): void {
     if (this.isPaused) return;
 
     const controlledPlayer = this.players[0];
+    const inputState = this.inputManager.getInputState();
 
-    if (this.cursors) {
-      let velocityX = 0;
-      let velocityY = 0;
-
-      if (this.cursors.left.isDown || this.input.keyboard?.checkDown(this.input.keyboard.addKey('A'))) {
-        velocityX = -1;
-      } else if (this.cursors.right.isDown || this.input.keyboard?.checkDown(this.input.keyboard.addKey('D'))) {
-        velocityX = 1;
-      }
-
-      if (this.cursors.up.isDown || this.input.keyboard?.checkDown(this.input.keyboard.addKey('W'))) {
-        velocityY = -1;
-      } else if (this.cursors.down.isDown || this.input.keyboard?.checkDown(this.input.keyboard.addKey('S'))) {
-        velocityY = 1;
-      }
-
-      controlledPlayer.move(velocityX, velocityY);
+    let speed = 1;
+    if (inputState.turbo && controlledPlayer.useTurbo(GAME_SETTINGS.turboDepletionRate * 0.016)) {
+      speed = 1.5;
     }
+
+    controlledPlayer.move(inputState.moveX * speed, inputState.moveY);
 
     this.players.forEach(player => player.update());
     this.ball.update();
+  }
+
+  shutdown(): void {
+    this.inputManager?.destroy();
+    this.pauseMenu?.destroy();
+    this.timerEvent?.destroy();
   }
 }
