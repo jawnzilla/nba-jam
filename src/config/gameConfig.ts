@@ -18,7 +18,7 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
   physics: {
     default: 'arcade',
     arcade: {
-      gravity: { x: 0, y: 800 },
+      gravity: { x: 0, y: 0 },
       debug: false,
     },
   },
@@ -31,11 +31,36 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
   antialias: false,
 };
 
+export const COURT = {
+  nearY: GAME_HEIGHT - 80,
+  farY: 180,
+  leftX: 80,
+  rightX: GAME_WIDTH - 80,
+  centerX: GAME_WIDTH / 2,
+  centerY: (GAME_HEIGHT - 80 + 180) / 2,
+  perspectiveScale: 0.6,
+};
+
 export const COURT_BOUNDS = {
-  left: 50,
-  right: GAME_WIDTH - 50,
-  top: 100,
-  bottom: GAME_HEIGHT - 50,
+  left: COURT.leftX,
+  right: COURT.rightX,
+  top: COURT.farY,
+  bottom: COURT.nearY,
+};
+
+export const HOOPS = {
+  near: {
+    x: GAME_WIDTH / 2,
+    y: COURT.nearY + 20,
+    rimY: COURT.nearY - 40,
+    scale: 1.2,
+  },
+  far: {
+    x: GAME_WIDTH / 2,
+    y: COURT.farY - 30,
+    rimY: COURT.farY - 20,
+    scale: 0.7,
+  },
 };
 
 export const GAME_SETTINGS = {

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_HEIGHT, COURT_BOUNDS } from '../config/gameConfig';
+import { COURT, COURT_BOUNDS, HOOPS } from '../config/gameConfig';
 import { Player } from './Player';
 
 type FlightCompleteCallback = () => void;
@@ -9,39 +9,47 @@ export class Ball extends Phaser.GameObjects.Sprite {
   private isInFlight = false;
   private isPassFlight = false;
   private targetX = 0;
-  private targetY = 0;
   private flightProgress = 0;
   private startX = 0;
-  private startY = 0;
+  private startCourtY = 0;
+  private targetCourtY = 0;
   private arcHeight = 100;
   private flightSpeed = 0.025;
   private onFlightComplete: FlightCompleteCallback | null = null;
-  private hoopZones: { left: Phaser.Geom.Rectangle; right: Phaser.Geom.Rectangle } | null = null;
+  private hoopZones: { near: Phaser.Geom.Rectangle; far: Phaser.Geom.Rectangle } | null = null;
   private bounceCount = 0;
   private maxBounces = 3;
   private shadow!: Phaser.GameObjects.Ellipse;
+  private courtY = 0;
+  private ballHeight = 0;
+  private velocityX = 0;
+  private velocityY = 0;
+  private velocityZ = 0;
+  private isLooseOnCourt = false;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, 'ball');
+
+    this.courtY = y;
 
     scene.add.existing(this);
     scene.physics.add.existing(this);
 
     const body = this.body as Phaser.Physics.Arcade.Body;
     body.setCircle(12);
-    body.setBounce(0.6, 0.6);
-    body.setCollideWorldBounds(true);
-    body.setDrag(100);
-    body.setFriction(0.3, 0.3);
+    body.setBounce(0);
+    body.setCollideWorldBounds(false);
+    body.setDrag(0);
+    body.setAllowGravity(false);
 
     this.setDepth(15);
     this.setScale(1);
 
-    this.shadow = scene.add.ellipse(x, GAME_HEIGHT - 20, 20, 8, 0x000000, 0.3);
+    this.shadow = scene.add.ellipse(x, y + 5, 20, 8, 0x000000, 0.3);
     this.shadow.setDepth(5);
   }
 
-  public setHoopZones(zones: { left: Phaser.Geom.Rectangle; right: Phaser.Geom.Rectangle } | null): void {
+  public setHoopZones(zones: { near: Phaser.Geom.Rectangle; far: Phaser.Geom.Rectangle } | null): void {
     this.hoopZones = zones;
   }
 
@@ -49,55 +57,67 @@ export class Ball extends Phaser.GameObjects.Sprite {
     this.holder = player;
     this.isInFlight = false;
     this.isPassFlight = false;
+    this.isLooseOnCourt = false;
     const body = this.body as Phaser.Physics.Arcade.Body;
     body.setVelocity(0, 0);
-    body.setAllowGravity(false);
     this.bounceCount = 0;
+    this.ballHeight = 0;
+    this.velocityX = 0;
+    this.velocityY = 0;
+    this.velocityZ = 0;
   }
 
   public release(targetX: number, targetY: number): void {
     this.holder = null;
     this.isInFlight = true;
     this.isPassFlight = false;
+    this.isLooseOnCourt = false;
     this.targetX = targetX;
-    this.targetY = targetY;
     this.startX = this.x;
-    this.startY = this.y;
+    this.startCourtY = this.courtY;
+    this.targetCourtY = targetY;
     this.flightProgress = 0;
     this.bounceCount = 0;
 
-    const distance = Phaser.Math.Distance.Between(this.x, this.y, targetX, targetY);
-    this.arcHeight = Math.min(250, Math.max(100, distance * 0.5));
-    this.flightSpeed = 0.02 + (1 / (distance + 100)) * 2;
+    const distanceX = Math.abs(targetX - this.x);
+    const distanceY = Math.abs(targetY - this.courtY);
+    const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
+    this.arcHeight = Math.min(200, Math.max(80, distance * 0.4));
+    this.flightSpeed = 0.015 + (1 / (distance + 100)) * 1.5;
 
     const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setAllowGravity(false);
+    body.setVelocity(0, 0);
   }
 
   public passTo(targetX: number, targetY: number, onComplete?: FlightCompleteCallback): void {
     this.holder = null;
     this.isInFlight = true;
     this.isPassFlight = true;
+    this.isLooseOnCourt = false;
     this.targetX = targetX;
-    this.targetY = targetY;
     this.startX = this.x;
-    this.startY = this.y;
+    this.startCourtY = this.courtY;
+    this.targetCourtY = targetY;
     this.flightProgress = 0;
     this.onFlightComplete = onComplete || null;
 
-    const distance = Phaser.Math.Distance.Between(this.x, this.y, targetX, targetY);
-    this.arcHeight = Math.min(50, distance * 0.2);
-    this.flightSpeed = 0.05;
+    const distance = Phaser.Math.Distance.Between(this.x, this.courtY, targetX, targetY);
+    this.arcHeight = Math.min(40, distance * 0.15);
+    this.flightSpeed = 0.04;
 
     const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setAllowGravity(false);
+    body.setVelocity(0, 0);
   }
 
   public followHolder(): void {
     if (this.holder) {
-      const offsetX = this.holder.flipX ? -25 : 25;
+      const offsetX = this.holder.flipX ? -20 : 20;
+      const jumpHeight = this.holder.getJumpHeight();
       this.x = this.holder.x + offsetX;
-      this.y = this.holder.y - 60;
+      this.courtY = this.holder.courtY;
+      this.ballHeight = 50 + jumpHeight;
+      this.y = this.courtY - this.ballHeight;
+      this.updateDepthAndScale();
     }
   }
 
@@ -105,9 +125,10 @@ export class Ball extends Phaser.GameObjects.Sprite {
     this.holder = null;
     this.isInFlight = false;
     this.isPassFlight = false;
-    const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setAllowGravity(true);
-    body.setVelocity(Phaser.Math.Between(-50, 50), -100);
+    this.isLooseOnCourt = true;
+    this.velocityX = Phaser.Math.Between(-30, 30);
+    this.velocityY = Phaser.Math.Between(-20, 20);
+    this.velocityZ = 2;
   }
 
   private updateFlight(): void {
@@ -117,11 +138,6 @@ export class Ball extends Phaser.GameObjects.Sprite {
 
     if (this.flightProgress >= 1) {
       this.isInFlight = false;
-      const body = this.body as Phaser.Physics.Arcade.Body;
-      body.setAllowGravity(true);
-
-      const endVelocityX = (this.targetX - this.startX) * 0.3;
-      body.setVelocity(endVelocityX, 150);
 
       if (this.isPassFlight && this.onFlightComplete) {
         this.onFlightComplete();
@@ -135,13 +151,16 @@ export class Ball extends Phaser.GameObjects.Sprite {
 
     const t = this.flightProgress;
     const easeT = this.easeInOutQuad(t);
-    this.x = this.startX + (this.targetX - this.startX) * easeT;
 
-    const linearY = this.startY + (this.targetY - this.startY) * t;
-    const arc = -4 * this.arcHeight * t * (t - 1);
-    this.y = linearY - arc;
+    this.x = this.startX + (this.targetX - this.startX) * easeT;
+    this.courtY = this.startCourtY + (this.targetCourtY - this.startCourtY) * t;
+
+    const arc = 4 * this.arcHeight * t * (1 - t);
+    this.ballHeight = arc;
+    this.y = this.courtY - this.ballHeight;
 
     this.rotation += 0.15;
+    this.updateDepthAndScale();
   }
 
   private easeInOutQuad(t: number): number {
@@ -154,15 +173,15 @@ export class Ball extends Phaser.GameObjects.Sprite {
       return;
     }
 
-    const ballPoint = new Phaser.Geom.Point(this.x, this.y);
+    const ballPoint = new Phaser.Geom.Point(this.x, this.courtY);
 
-    const nearLeftHoop = this.hoopZones.left.contains(ballPoint.x, ballPoint.y);
-    const nearRightHoop = this.hoopZones.right.contains(ballPoint.x, ballPoint.y);
+    const nearNear = this.hoopZones.near.contains(ballPoint.x, ballPoint.y);
+    const nearFar = this.hoopZones.far.contains(ballPoint.x, ballPoint.y);
 
-    if (nearLeftHoop || nearRightHoop) {
+    if (nearNear || nearFar) {
       const gameScene = this.scene as unknown as { addScore: (team: 'home' | 'away', points: number) => void };
       if (typeof gameScene.addScore === 'function') {
-        const team = nearRightHoop ? 'home' : 'away';
+        const team = nearFar ? 'home' : 'away';
         const points = this.calculatePoints();
         gameScene.addScore(team, points);
       }
@@ -170,21 +189,20 @@ export class Ball extends Phaser.GameObjects.Sprite {
     } else {
       this.createMissEffect();
     }
+
+    this.startLooseBounce();
   }
 
   private checkBasketLegacy(): void {
-    const hoopLeftX = COURT_BOUNDS.left + 20;
-    const hoopRightX = COURT_BOUNDS.right - 20;
-    const hoopY = GAME_HEIGHT - 170;
-    const tolerance = 35;
+    const tolerance = 40;
 
-    const nearLeftHoop = Math.abs(this.x - hoopLeftX) < tolerance && Math.abs(this.y - hoopY) < tolerance;
-    const nearRightHoop = Math.abs(this.x - hoopRightX) < tolerance && Math.abs(this.y - hoopY) < tolerance;
+    const nearNearHoop = Math.abs(this.x - HOOPS.near.x) < tolerance && Math.abs(this.courtY - HOOPS.near.y) < tolerance;
+    const nearFarHoop = Math.abs(this.x - HOOPS.far.x) < tolerance && Math.abs(this.courtY - HOOPS.far.y) < tolerance;
 
-    if (nearLeftHoop || nearRightHoop) {
+    if (nearNearHoop || nearFarHoop) {
       const gameScene = this.scene as unknown as { addScore: (team: 'home' | 'away', points: number) => void };
       if (typeof gameScene.addScore === 'function') {
-        const team = nearRightHoop ? 'home' : 'away';
+        const team = nearFarHoop ? 'home' : 'away';
         const points = this.calculatePoints();
         gameScene.addScore(team, points);
       }
@@ -192,13 +210,24 @@ export class Ball extends Phaser.GameObjects.Sprite {
     } else {
       this.createMissEffect();
     }
+
+    this.startLooseBounce();
+  }
+
+  private startLooseBounce(): void {
+    this.isLooseOnCourt = true;
+    this.velocityX = Phaser.Math.Between(-50, 50);
+    this.velocityY = Phaser.Math.Between(-30, 30);
+    this.velocityZ = 3;
+    this.ballHeight = 20;
   }
 
   private calculatePoints(): number {
-    const threePointLineLeft = COURT_BOUNDS.left + 150;
-    const threePointLineRight = COURT_BOUNDS.right - 150;
+    const courtDepth = COURT.nearY - COURT.farY;
+    const midCourtY = COURT.farY + courtDepth / 2;
 
-    if (this.startX < threePointLineLeft || this.startX > threePointLineRight) {
+    const distanceFromHoop = Math.abs(this.startCourtY - (this.targetCourtY < midCourtY ? HOOPS.far.y : HOOPS.near.y));
+    if (distanceFromHoop > courtDepth * 0.4) {
       return 3;
     }
     return 2;
@@ -218,7 +247,7 @@ export class Ball extends Phaser.GameObjects.Sprite {
       particles.destroy();
     });
 
-    const scoreText = this.scene.add.text(this.x, this.y - 50, 'SCORE!', {
+    const scoreText = this.scene.add.text(this.x, this.y - 30, 'SCORE!', {
       fontFamily: 'Arial Black',
       fontSize: '24px',
       color: '#ffff00',
@@ -229,7 +258,7 @@ export class Ball extends Phaser.GameObjects.Sprite {
 
     this.scene.tweens.add({
       targets: scoreText,
-      y: scoreText.y - 50,
+      y: scoreText.y - 40,
       alpha: 0,
       duration: 1000,
       ease: 'Power2',
@@ -253,30 +282,83 @@ export class Ball extends Phaser.GameObjects.Sprite {
     });
   }
 
-  private updateBounce(): void {
-    const body = this.body as Phaser.Physics.Arcade.Body;
+  private updateLooseBall(): void {
+    if (!this.isLooseOnCourt) return;
 
-    if (body.blocked.down && !this.isInFlight && !this.holder) {
+    this.x += this.velocityX * 0.016 * 60;
+    this.courtY += this.velocityY * 0.016 * 60;
+
+    this.ballHeight += this.velocityZ;
+    this.velocityZ -= 0.3;
+
+    if (this.ballHeight <= 0) {
+      this.ballHeight = 0;
       this.bounceCount++;
 
-      if (this.bounceCount >= this.maxBounces) {
-        body.setVelocity(0, 0);
-        body.setDrag(500);
+      if (this.bounceCount < this.maxBounces) {
+        this.velocityZ = Math.abs(this.velocityZ) * 0.6;
+        this.velocityX *= 0.7;
+        this.velocityY *= 0.7;
+      } else {
+        this.velocityX = 0;
+        this.velocityY = 0;
+        this.velocityZ = 0;
       }
     }
+
+    this.constrainToCourt();
+
+    this.y = this.courtY - this.ballHeight;
+    this.rotation += this.velocityX * 0.01;
+    this.updateDepthAndScale();
+  }
+
+  private constrainToCourt(): void {
+    const t = (this.courtY - COURT.farY) / (COURT.nearY - COURT.farY);
+    const nearWidth = COURT.rightX - COURT.leftX;
+    const farWidth = nearWidth * COURT.perspectiveScale;
+    const width = farWidth + (nearWidth - farWidth) * t;
+    const leftBound = COURT.centerX - width / 2;
+    const rightBound = COURT.centerX + width / 2;
+
+    if (this.x < leftBound) {
+      this.x = leftBound;
+      this.velocityX = Math.abs(this.velocityX) * 0.5;
+    }
+    if (this.x > rightBound) {
+      this.x = rightBound;
+      this.velocityX = -Math.abs(this.velocityX) * 0.5;
+    }
+    if (this.courtY < COURT_BOUNDS.top) {
+      this.courtY = COURT_BOUNDS.top;
+      this.velocityY = Math.abs(this.velocityY) * 0.5;
+    }
+    if (this.courtY > COURT_BOUNDS.bottom) {
+      this.courtY = COURT_BOUNDS.bottom;
+      this.velocityY = -Math.abs(this.velocityY) * 0.5;
+    }
+  }
+
+  private updateDepthAndScale(): void {
+    const t = (this.courtY - COURT.farY) / (COURT.nearY - COURT.farY);
+    const scale = COURT.perspectiveScale + (1 - COURT.perspectiveScale) * t;
+    this.setScale(scale * 0.8);
+    this.setDepth(15 + this.courtY + this.ballHeight);
   }
 
   private updateShadow(): void {
     this.shadow.x = this.x;
-    const groundY = GAME_HEIGHT - 25;
-    this.shadow.y = groundY;
+    this.shadow.y = this.courtY + 5;
 
-    const heightAboveGround = Math.max(0, groundY - this.y);
-    const shadowScale = Math.max(0.3, 1 - heightAboveGround / 300);
-    const shadowAlpha = Math.max(0.1, 0.3 - heightAboveGround / 500);
+    const t = (this.courtY - COURT.farY) / (COURT.nearY - COURT.farY);
+    const scale = COURT.perspectiveScale + (1 - COURT.perspectiveScale) * t;
+
+    const shadowScale = scale * Math.max(0.4, 1 - this.ballHeight / 200);
+    const shadowAlpha = Math.max(0.1, 0.3 - this.ballHeight / 400);
 
     this.shadow.setScale(shadowScale, shadowScale * 0.4);
     this.shadow.setAlpha(shadowAlpha);
+    this.shadow.setDepth(5 + this.courtY);
   }
 
   public update(): void {
@@ -284,29 +366,11 @@ export class Ball extends Phaser.GameObjects.Sprite {
       this.updateFlight();
     } else if (this.holder) {
       this.followHolder();
-    } else {
-      this.updateBounce();
+    } else if (this.isLooseOnCourt) {
+      this.updateLooseBall();
     }
 
     this.updateShadow();
-
-    if (this.y > GAME_HEIGHT - 30) {
-      this.y = GAME_HEIGHT - 30;
-      const body = this.body as Phaser.Physics.Arcade.Body;
-      if (body.velocity.y > 0) {
-        body.setVelocityY(-body.velocity.y * 0.5);
-      }
-    }
-
-    if (this.x < COURT_BOUNDS.left) {
-      this.x = COURT_BOUNDS.left;
-      const body = this.body as Phaser.Physics.Arcade.Body;
-      body.setVelocityX(Math.abs(body.velocity.x) * 0.5);
-    } else if (this.x > COURT_BOUNDS.right) {
-      this.x = COURT_BOUNDS.right;
-      const body = this.body as Phaser.Physics.Arcade.Body;
-      body.setVelocityX(-Math.abs(body.velocity.x) * 0.5);
-    }
   }
 
   public isLoose(): boolean {
@@ -315,6 +379,10 @@ export class Ball extends Phaser.GameObjects.Sprite {
 
   public getHolder(): Player | null {
     return this.holder;
+  }
+
+  public getCourtY(): number {
+    return this.courtY;
   }
 
   public destroy(fromScene?: boolean): void {
